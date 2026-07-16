@@ -29,6 +29,12 @@ def _make_display(args):
     return GoveeDisplay(_make_client(args), max_colors=max_colors)
 
 
+def _resolve_duration(args):
+    if getattr(args, "forever", False):
+        return None
+    return args.duration if args.duration is not None else 10.0
+
+
 def cmd_text(args):
     display = _make_display(args)
     if args.color.lower() == "auto":
@@ -39,6 +45,7 @@ def cmd_text(args):
         display.brightness(args.brightness)
     text = args.text.upper()
     interval = args.interval if args.interval is not None else 1.0
+    duration = _resolve_duration(args)
     if args.segments:
         if args.mode == "scroll":
             frames = text_mod.scroll_frames(text, color=color, bg=0)
@@ -47,13 +54,13 @@ def cmd_text(args):
                 text, color=color, bg=0, blank=not args.no_blank, solid=args.solid
             )
         count = display.run_frames(
-            frames, duration=args.duration, frame_interval=interval,
+            frames, duration=duration, frame_interval=interval,
             on_stop_clear=not args.keep,
         )
     else:
         color_gen = text_mod.color_frames(text, color=color, blank=not args.no_blank)
         count = display.run_color_frames(
-            color_gen, duration=args.duration, frame_interval=interval,
+            color_gen, duration=duration, frame_interval=interval,
             on_stop_clear=not args.keep,
         )
     print(f"Displayed {count} frames.")
@@ -67,8 +74,9 @@ def cmd_animate(args):
     if args.brightness is not None:
         display.brightness(args.brightness)
     interval = args.interval if args.interval is not None else 0.6
+    duration = _resolve_duration(args)
     count = display.run_frames(
-        frames, duration=args.duration, frame_interval=interval,
+        frames, duration=duration, frame_interval=interval,
         on_stop_clear=not args.keep,
     )
     print(f"Rendered {count} frames.")
@@ -100,8 +108,9 @@ def cmd_scene(args):
         display.brightness(scene.get("brightness", 80))
     frames = scenes_mod.build_scene_frames(scene)
     interval = args.interval if args.interval is not None else scene.get("frame_interval", 0.6)
+    duration = _resolve_duration(args)
     count = display.run_frames(
-        frames, duration=args.duration, frame_interval=interval,
+        frames, duration=duration, frame_interval=interval,
         on_stop_clear=not args.keep,
     )
     print(f"Scene '{args.name}' ({scene['description']}) ran {count} frames.")
@@ -257,7 +266,9 @@ def build_parser():
     p_text.add_argument("--no-blank", action="store_true",
                          help="Skip blank frame between letters")
     p_text.add_argument("--duration", type=float, default=None,
-                        help="Seconds to run (default: forever)")
+                        help="Seconds to run (default: 10)")
+    p_text.add_argument("--forever", action="store_true",
+                        help="Run indefinitely (use with caution, may leave process running)")
     p_text.add_argument("--interval", type=float, default=None,
                         help="Seconds per frame (default: 1.0)")
     p_text.add_argument("--brightness", type=int, default=None,
@@ -272,7 +283,9 @@ def build_parser():
     p_anim.add_argument("name", help="Animation name")
     p_anim.add_argument("--color", default=None, help="Override animation color")
     p_anim.add_argument("--duration", type=float, default=None,
-                        help="Seconds to run (default: forever)")
+                        help="Seconds to run (default: 10)")
+    p_anim.add_argument("--forever", action="store_true",
+                        help="Run indefinitely (use with caution)")
     p_anim.add_argument("--interval", type=float, default=None,
                         help="Seconds per frame (default: 0.6)")
     p_anim.add_argument("--brightness", type=int, default=None)
@@ -289,7 +302,10 @@ def build_parser():
 
     p_scene = sub.add_parser("scene", help="Run a scene preset")
     p_scene.add_argument("name", help="Scene name")
-    p_scene.add_argument("--duration", type=float, default=None)
+    p_scene.add_argument("--duration", type=float, default=None,
+                         help="Seconds to run (default: 10)")
+    p_scene.add_argument("--forever", action="store_true",
+                         help="Run indefinitely (use with caution)")
     p_scene.add_argument("--interval", type=float, default=None)
     p_scene.add_argument("--brightness", type=int, default=None)
     p_scene.add_argument("--max-colors", type=int, default=6,

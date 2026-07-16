@@ -1,11 +1,14 @@
 """Display controller managing the 15-segment lamp."""
 
+import signal
 import sys
 import time
 
 from .client import GoveeClient
 from .colors import int_to_rgb, quantize_frame
 from .font import WIDTH, HEIGHT, NUM_SEGMENTS
+
+DEFAULT_DURATION = 10.0
 
 
 class GoveeDisplay:
@@ -20,6 +23,7 @@ class GoveeDisplay:
         self._powered = False
         self._frame_count = 0
         self._last_frame = None
+        self._stop = False
 
     def _ensure_power(self):
         if self.auto_power and not self._powered:
@@ -51,6 +55,19 @@ class GoveeDisplay:
             lines.append(line)
         sys.stdout.write("\n".join(lines) + "\n")
         sys.stdout.flush()
+
+    def _install_signal_handlers(self):
+        self._stop = False
+
+        def _handler(signum, frame):
+            self._stop = True
+
+        self._old_int = signal.signal(signal.SIGINT, _handler)
+        self._old_term = signal.signal(signal.SIGTERM, _handler)
+
+    def _restore_signal_handlers(self):
+        signal.signal(signal.SIGINT, self._old_int)
+        signal.signal(signal.SIGTERM, self._old_term)
 
     def render(self, colors):
         """Render a frame (list of 15 RGB integers) to the lamp."""
@@ -107,52 +124,60 @@ class GoveeDisplay:
             self.client.set_color(int(color))
         self._frame_count += 1
 
-    def run_color_frames(self, color_gen, duration=None, frame_interval=1.0,
-                         on_stop_clear=True):
-        """Run a generator of single color ints (whole-lamp color mode)."""
-        start = time.monotonic()
-        count = 0
-        try:
-            for color in color_gen:
-                if duration is not None and (time.monotonic() - start) >= duration:
-                    break
-                self.render_color(color)
-                count += 1
-                time.sleep(frame_interval)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            if on_stop_clear:
-                self.render_color(0)
-        return count
-
     def power_off(self):
         """Turn the lamp off."""
         self.client.set_power(False)
         self._powered = False
 
-    def run_frames(self, frames, duration=None, frame_interval=0.6,
+    def run_frames(self, frames, duration=DEFAULT_DURATION, frame_interval=0.6,
                    on_stop_clear=True):
-        """Run a frame generator, pacing output to the rate limit.
+        """Run a frame generator with automatic timeout and signal handling.
 
         Args:
             frames: iterable yielding lists of 15 colors.
-            duration: stop after this many seconds (None = run forever).
+            duration: stop after this many seconds (None = forever, not recommended).
             frame_interval: seconds to hold each frame.
             on_stop_clear: clear the display when finished.
         """
+        self._install_signal_handlers()
         start = time.monotonic()
         count = 0
         try:
             for frame in frames:
+                if self._stop:
+                    break
                 if duration is not None and (time.monotonic() - start) >= duration:
                     break
                 self.render(frame)
                 count += 1
                 time.sleep(frame_interval)
-        except KeyboardInterrupt:
+        except Exception:
             pass
         finally:
+            self._restore_signal_handlers()
             if on_stop_clear:
                 self.clear()
+        return count
+
+    def run_color_frames(self, color_gen, duration=DEFAULT_DURATION,
+                         frame_interval=1.0, on_stop_clear=True):
+        """Run a generator of single color ints (whole-lamp color mode)."""
+        self._install_signal_handlers()
+        start = time.monotonic()
+        count = 0
+        try:
+            for color in color_gen:
+                if self._stop:
+                    break
+                if duration is not None and (time.monotonic() - start) >= duration:
+                    break
+                self.render_color(color)
+                count += 1
+                time.sleep(frame_interval)
+        except Exception:
+            pass
+        finally:
+            self._restore_signal_handlers()
+            if on_stop_clear:
+                self.render_color(0)
         return count
