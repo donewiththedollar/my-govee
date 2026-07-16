@@ -119,7 +119,7 @@ class GoveeDisplay:
         self._powered = False
 
     def run_frames(self, frames, duration=DEFAULT_DURATION, frame_interval=0.6,
-                   on_stop_clear=True):
+                   on_stop_clear=False):
         self._install_signals()
         start = time.monotonic()
         count = 0
@@ -141,7 +141,7 @@ class GoveeDisplay:
         return count
 
     def run_color_frames(self, color_gen, duration=DEFAULT_DURATION,
-                         frame_interval=1.0, on_stop_clear=True):
+                         frame_interval=1.0, on_stop_clear=False):
         self._install_signals()
         start = time.monotonic()
         count = 0
@@ -163,7 +163,7 @@ class GoveeDisplay:
         return count
 
     def run_timed_color_frames(self, timed_gen, duration=DEFAULT_DURATION,
-                               on_stop_clear=True):
+                               on_stop_clear=False):
         """Run (color, hold_seconds) pairs — for morse code."""
         self._install_signals()
         start = time.monotonic()
@@ -186,7 +186,7 @@ class GoveeDisplay:
                 self.render_color(0)
         return count
 
-    def run_scene(self, scene, brightness=None):
+    def run_scene(self, scene, brightness=None, keep=False):
         """Run a scene with multiple steps (text + animation)."""
         self._install_signals()
         if brightness is not None:
@@ -227,5 +227,6 @@ class GoveeDisplay:
             pass
         finally:
             self._restore_signals()
-            self.clear()
+            if not keep:
+                self.clear()
         return total

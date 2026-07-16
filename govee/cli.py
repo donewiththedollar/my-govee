@@ -127,7 +127,8 @@ def cmd_scene(args):
     display = _make_display(args)
     scene = scenes_mod.get_scene(args.name)
     brightness = args.brightness if args.brightness is not None else scene.get("brightness", 80)
-    count = display.run_scene(scene, brightness=brightness)
+    keep = getattr(args, "keep", False)
+    count = display.run_scene(scene, brightness=brightness, keep=keep)
     print(f"Scene '{args.name}' ({scene['description']}) ran {count} frames.")
 
 
