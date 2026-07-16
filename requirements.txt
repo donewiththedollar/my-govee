@@ -1,0 +1,3 @@
+# govee-display has zero external dependencies.
+# It uses only the Python standard library (urllib, json, math, etc.).
+# No pip install required.
