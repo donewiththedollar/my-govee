@@ -50,6 +50,24 @@ def render_solid(ch, color, bg=0):
     return [color] * NUM_SEGMENTS
 
 
+def color_frames(text, color=None, blank=True):
+    """Yield whole-lamp color values (single int per frame) for text.
+
+    Uses the colorRgb capability (whole-lamp color) instead of segment
+    commands. More reliable on devices where segment control may not
+    be fully supported via the cloud API.
+    """
+    if not text:
+        while True:
+            yield 0
+    while True:
+        for ch in text:
+            c = color if color is not None else letter_color(ch)
+            yield c
+            if blank:
+                yield 0
+
+
 def flash_frames(text, color=None, bg=0, blank=True, solid=False):
     """Yield frames that flash each character sequentially (loops forever).
 

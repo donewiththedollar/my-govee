@@ -20,6 +20,7 @@ def _make_client(args):
         device=getattr(args, "device", None),
         sku=getattr(args, "sku", None),
         dry_run=getattr(args, "dry_run", False),
+        debug=getattr(args, "debug", False),
     )
 
 
@@ -37,17 +38,24 @@ def cmd_text(args):
     if args.brightness is not None:
         display.brightness(args.brightness)
     text = args.text.upper()
-    if args.mode == "scroll":
-        frames = text_mod.scroll_frames(text, color=color, bg=0)
-    else:
-        frames = text_mod.flash_frames(
-            text, color=color, bg=0, blank=not args.no_blank, solid=args.solid
-        )
     interval = args.interval if args.interval is not None else 1.0
-    count = display.run_frames(
-        frames, duration=args.duration, frame_interval=interval,
-        on_stop_clear=not args.keep,
-    )
+    if args.segments:
+        if args.mode == "scroll":
+            frames = text_mod.scroll_frames(text, color=color, bg=0)
+        else:
+            frames = text_mod.flash_frames(
+                text, color=color, bg=0, blank=not args.no_blank, solid=args.solid
+            )
+        count = display.run_frames(
+            frames, duration=args.duration, frame_interval=interval,
+            on_stop_clear=not args.keep,
+        )
+    else:
+        color_gen = text_mod.color_frames(text, color=color, blank=not args.no_blank)
+        count = display.run_color_frames(
+            color_gen, duration=args.duration, frame_interval=interval,
+            on_stop_clear=not args.keep,
+        )
     print(f"Displayed {count} frames.")
 
 
@@ -153,6 +161,48 @@ def cmd_test(args):
         print("\nSegment test complete.")
 
 
+def cmd_segtest(args):
+    """Test segment color control and print API responses for debugging."""
+    client = _make_client(args)
+    color = parse_color(args.color)
+    from .font import NUM_SEGMENTS
+    print("=== Segment Control Test ===")
+    print(f"Device: {client.sku} / {client.device}")
+    print(f"Segments: {NUM_SEGMENTS} (0-{NUM_SEGMENTS - 1})")
+    print(f"Test color: {args.color} (0x{color:06X} = {color})")
+    print()
+    print("1. Turning lamp on...")
+    r = client.set_power(True)
+    print(f"   Response: {r}")
+    time.sleep(0.5)
+    print("2. Setting ALL segments to test color...")
+    r = client.set_segments([color] * NUM_SEGMENTS)
+    print(f"   Response: {r}")
+    time.sleep(2)
+    print("3. Setting ALL segments to black (off)...")
+    r = client.set_segments([0] * NUM_SEGMENTS)
+    print(f"   Response: {r}")
+    time.sleep(1)
+    print("4. Setting segment 0 only to test color...")
+    frame = [0] * NUM_SEGMENTS
+    frame[0] = color
+    r = client.set_segments(frame)
+    print(f"   Response: {r}")
+    time.sleep(2)
+    print("5. Setting whole-lamp color via colorRgb...")
+    r = client.set_color(color)
+    print(f"   Response: {r}")
+    time.sleep(2)
+    print("6. Turning lamp off...")
+    r = client.set_power(False)
+    print(f"   Response: {r}")
+    print()
+    print("=== Test complete ===")
+    print("If the lamp changed color in step 5 (colorRgb) but NOT in steps 2/4,")
+    print("segment control may not be supported via the cloud API for this device.")
+    print("Use text/scene commands WITHOUT --segments (default uses colorRgb).")
+
+
 def cmd_segments(args):
     """Print the segment index to grid position mapping."""
     from .font import WIDTH, HEIGHT, NUM_SEGMENTS
@@ -190,6 +240,8 @@ def build_parser():
                         help="Device SKU/model (env: GOVEE_SKU, default: H6022)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Preview frames locally without API calls")
+    parser.add_argument("--debug", action="store_true",
+                        help="Print API requests and responses for debugging")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_text = sub.add_parser("text", help="Display scrolling/flashing text")
@@ -200,6 +252,8 @@ def build_parser():
                         help="flash = one letter at a time, scroll = marquee")
     p_text.add_argument("--solid", action="store_true",
                         help="Light ALL segments per letter (max visibility on 1D strip)")
+    p_text.add_argument("--segments", action="store_true",
+                        help="Use segment color commands instead of whole-lamp color")
     p_text.add_argument("--no-blank", action="store_true",
                          help="Skip blank frame between letters")
     p_text.add_argument("--duration", type=float, default=None,
@@ -272,6 +326,10 @@ def build_parser():
                         help="Seconds per segment")
     p_test.add_argument("--brightness", type=int, default=None)
     p_test.set_defaults(func=cmd_test)
+
+    p_segtest = sub.add_parser("segtest", help="Test segment control + print API responses")
+    p_segtest.add_argument("--color", default="red")
+    p_segtest.set_defaults(func=cmd_segtest)
 
     p_seg = sub.add_parser("segments", help="Show segment-to-grid mapping")
     p_seg.set_defaults(func=cmd_segments)

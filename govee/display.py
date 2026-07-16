@@ -93,6 +93,39 @@ class GoveeDisplay:
         self._ensure_power()
         self.client.set_color(rgb)
 
+    def render_color(self, color):
+        """Set the whole lamp to a single color (uses colorRgb capability)."""
+        if self.client.dry_run:
+            frame = [int(color)] * self.num_segments
+            self._preview(frame)
+            self._frame_count += 1
+            return
+        if color == 0:
+            self.client.set_color(0)
+        else:
+            self._ensure_power()
+            self.client.set_color(int(color))
+        self._frame_count += 1
+
+    def run_color_frames(self, color_gen, duration=None, frame_interval=1.0,
+                         on_stop_clear=True):
+        """Run a generator of single color ints (whole-lamp color mode)."""
+        start = time.monotonic()
+        count = 0
+        try:
+            for color in color_gen:
+                if duration is not None and (time.monotonic() - start) >= duration:
+                    break
+                self.render_color(color)
+                count += 1
+                time.sleep(frame_interval)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            if on_stop_clear:
+                self.render_color(0)
+        return count
+
     def power_off(self):
         """Turn the lamp off."""
         self.client.set_power(False)

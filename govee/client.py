@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import threading
 import time
 import urllib.error
@@ -55,12 +56,13 @@ class GoveeClient:
 
     def __init__(self, api_key=None, sku=None, device=None,
                  base_url=DEFAULT_BASE_URL, rate=RATE_LIMIT, burst=RATE_BURST,
-                 dry_run=False):
+                 dry_run=False, debug=False):
         self.api_key = api_key or os.environ.get("GOVEE_API_KEY")
         self.sku = sku or os.environ.get("GOVEE_SKU") or DEFAULT_SKU
         self.device = device or os.environ.get("GOVEE_DEVICE")
         self.base_url = base_url.rstrip("/")
         self.dry_run = dry_run
+        self.debug = debug
         self._limiter = RateLimiter(rate, burst)
         if not self.dry_run:
             if not self.api_key:
@@ -84,8 +86,12 @@ class GoveeClient:
         url = f"{self.base_url}{path}"
         body = json.dumps(payload).encode("utf-8")
         if self.dry_run:
+            if self.debug:
+                sys.stderr.write(f"[DEBUG] {path}\n  Request: {body.decode()}\n  (dry-run, no API call)\n")
             return {"code": 200, "message": "OK", "data": {}}
         self._limiter.acquire()
+        if self.debug:
+            sys.stderr.write(f"[DEBUG] POST {path}\n  Request: {body.decode()}\n")
         last_error = None
         for attempt in range(MAX_RETRIES):
             req = urllib.request.Request(
@@ -93,7 +99,15 @@ class GoveeClient:
             )
             try:
                 with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-                    return json.loads(resp.read().decode("utf-8"))
+                    result = json.loads(resp.read().decode("utf-8"))
+                    if self.debug:
+                        sys.stderr.write(f"  Response: {json.dumps(result)}\n")
+                    if isinstance(result, dict):
+                        code = result.get("code", 200)
+                        if code != 200:
+                            msg = result.get("message", "Unknown error")
+                            raise GoveeAPIError(f"API error (code {code}): {msg}")
+                    return result
             except urllib.error.HTTPError as exc:
                 last_error = exc
                 err_body = ""
@@ -101,12 +115,16 @@ class GoveeClient:
                     err_body = exc.read().decode("utf-8", "replace")
                 except Exception:
                     pass
+                if self.debug:
+                    sys.stderr.write(f"  HTTPError {exc.code}: {err_body}\n")
                 if exc.code in RETRY_STATUS and attempt < MAX_RETRIES - 1:
                     time.sleep(0.5 * (attempt + 1))
                     continue
                 raise GoveeAPIError(f"HTTP {exc.code}: {err_body}") from exc
             except urllib.error.URLError as exc:
                 last_error = exc
+                if self.debug:
+                    sys.stderr.write(f"  URLError: {exc}\n")
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(0.5 * (attempt + 1))
                     continue
