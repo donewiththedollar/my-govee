@@ -24,20 +24,26 @@ def _make_client(args):
 
 
 def _make_display(args):
-    return GoveeDisplay(_make_client(args))
+    max_colors = getattr(args, "max_colors", 0) or 0
+    return GoveeDisplay(_make_client(args), max_colors=max_colors)
 
 
 def cmd_text(args):
     display = _make_display(args)
-    color = parse_color(args.color)
+    if args.color.lower() == "auto":
+        color = None
+    else:
+        color = parse_color(args.color)
     if args.brightness is not None:
         display.brightness(args.brightness)
     text = args.text.upper()
     if args.mode == "scroll":
-        frames = text_mod.scroll_frames(text, color, bg=0)
+        frames = text_mod.scroll_frames(text, color=color, bg=0)
     else:
-        frames = text_mod.flash_frames(text, color, bg=0, blank=not args.no_blank)
-    interval = args.interval if args.interval is not None else 0.8
+        frames = text_mod.flash_frames(
+            text, color=color, bg=0, blank=not args.no_blank, solid=args.solid
+        )
+    interval = args.interval if args.interval is not None else 1.0
     count = display.run_frames(
         frames, duration=args.duration, frame_interval=interval,
         on_stop_clear=not args.keep,
@@ -188,17 +194,22 @@ def build_parser():
 
     p_text = sub.add_parser("text", help="Display scrolling/flashing text")
     p_text.add_argument("text", help="Text to display")
-    p_text.add_argument("--color", default="white", help="Text color")
+    p_text.add_argument("--color", default="auto",
+                        help="Text color or 'auto' for per-letter unique colors")
     p_text.add_argument("--mode", choices=["flash", "scroll"], default="flash",
                         help="flash = one letter at a time, scroll = marquee")
+    p_text.add_argument("--solid", action="store_true",
+                        help="Light ALL segments per letter (max visibility on 1D strip)")
     p_text.add_argument("--no-blank", action="store_true",
                          help="Skip blank frame between letters")
     p_text.add_argument("--duration", type=float, default=None,
                         help="Seconds to run (default: forever)")
     p_text.add_argument("--interval", type=float, default=None,
-                        help="Seconds per frame (default: 0.8)")
+                        help="Seconds per frame (default: 1.0)")
     p_text.add_argument("--brightness", type=int, default=None,
                         help="Brightness 0-100")
+    p_text.add_argument("--max-colors", type=int, default=0,
+                        help="Quantize to N colors max per frame (0 = no limit)")
     p_text.add_argument("--keep", action="store_true",
                         help="Do not clear display on exit")
     p_text.set_defaults(func=cmd_text)
@@ -211,6 +222,8 @@ def build_parser():
     p_anim.add_argument("--interval", type=float, default=None,
                         help="Seconds per frame (default: 0.6)")
     p_anim.add_argument("--brightness", type=int, default=None)
+    p_anim.add_argument("--max-colors", type=int, default=6,
+                        help="Quantize to N colors per frame (default: 6, 0 = no limit)")
     p_anim.add_argument("--keep", action="store_true")
     p_anim.set_defaults(func=cmd_animate)
 
@@ -225,6 +238,8 @@ def build_parser():
     p_scene.add_argument("--duration", type=float, default=None)
     p_scene.add_argument("--interval", type=float, default=None)
     p_scene.add_argument("--brightness", type=int, default=None)
+    p_scene.add_argument("--max-colors", type=int, default=6,
+                        help="Quantize to N colors per frame (default: 6, 0 = no limit)")
     p_scene.add_argument("--keep", action="store_true")
     p_scene.set_defaults(func=cmd_scene)
 

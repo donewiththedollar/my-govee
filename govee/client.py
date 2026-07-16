@@ -113,7 +113,7 @@ class GoveeClient:
                 raise GoveeAPIError(f"Request failed: {exc}") from exc
         raise GoveeAPIError(f"Request failed after {MAX_RETRIES} retries: {last_error}")
 
-    def _payload(self, commands=None, capability=None):
+    def _payload(self, capability=None):
         payload = {
             "requestId": str(uuid.uuid4()),
             "payload": {
@@ -121,20 +121,23 @@ class GoveeClient:
                 "device": self.device,
             },
         }
-        if commands is not None:
-            payload["payload"]["commands"] = commands
         if capability is not None:
             payload["payload"]["capability"] = capability
         return payload
 
-    def control(self, commands):
-        """Send one or more capability commands to the device."""
-        if isinstance(commands, dict):
-            commands = [commands]
-        results = []
-        for cap in commands:
-            results.append(self._request("/device/control", self._payload(capability=cap)))
-        return results[0] if len(results) == 1 else results
+    def control(self, capability):
+        """Send a single capability command to the device.
+
+        The Govee API v2 control endpoint accepts ONE capability object
+        (singular), not an array. For multi-segment colors, call this
+        once per color group.
+        """
+        if isinstance(capability, list):
+            results = []
+            for cap in capability:
+                results.append(self.control(cap))
+            return results
+        return self._request("/device/control", self._payload(capability=capability))
 
     def get_state(self, capability=None):
         """Query the device state."""
@@ -142,68 +145,76 @@ class GoveeClient:
 
     def set_power(self, on=True):
         """Turn the device on or off."""
-        return self.control([{
+        return self.control({
             "type": "devices.capabilities.on_off",
             "instance": "powerSwitch",
             "value": 1 if on else 0,
-        }])
+        })
 
     def set_brightness(self, value):
         """Set brightness (0-100)."""
         value = max(0, min(100, int(value)))
-        return self.control([{
+        return self.control({
             "type": "devices.capabilities.range",
             "instance": "brightness",
             "value": value,
-        }])
+        })
 
     def set_color(self, rgb):
         """Set the whole-lamp color."""
-        return self.control([{
+        return self.control({
             "type": "devices.capabilities.color_setting",
             "instance": "colorRgb",
             "value": int(rgb),
-        }])
+        })
 
-    def set_segments(self, segment_colors, max_commands=0):
-        """Set per-segment colors, grouping segments by color to minimize commands."""
+    def set_segment_groups(self, groups):
+        """Send segment colors from a {color: [segment_indices]} dict.
+
+        Each color group is sent as a separate API call (one capability
+        per request, as required by the Govee API v2).
+        """
+        results = []
+        for color, segments in groups.items():
+            capability = {
+                "type": "devices.capabilities.segment_color_setting",
+                "instance": "segmentedColorRgb",
+                "value": {"segment": segments, "rgb": int(color)},
+            }
+            results.append(self.control(capability))
+        return results
+
+    def set_segments(self, segment_colors):
+        """Set per-segment colors, grouping segments by color.
+
+        Each color group is sent as a separate API call because the
+        Govee API v2 accepts a single 'capability' object per request.
+        """
         groups = {}
         for idx, color in enumerate(segment_colors):
             groups.setdefault(int(color), []).append(idx)
-        commands = []
-        for color, segments in groups.items():
-            commands.append({
-                "type": "devices.capabilities.segment_color_setting",
-                "instance": "segmentedColorRgb",
-                "value": {"segment": segments, "rgb": color},
-            })
-        if max_commands and len(commands) > max_commands:
-            results = []
-            for i in range(0, len(commands), max_commands):
-                results.append(self.control(commands[i:i + max_commands]))
-            return results
-        return self.control(commands)
+        return self.set_segment_groups(groups)
 
     def set_diy_scene(self, scene_code):
         """Activate a DIY scene."""
-        return self.control([{
+        return self.control({
             "type": "devices.capabilities.dynamic_scene",
             "instance": "diyScene",
             "value": scene_code,
-        }])
+        })
 
     def set_light_scene(self, scene_code):
         """Activate a preset light scene."""
-        return self.control([{
+        return self.control({
             "type": "devices.capabilities.dynamic_scene",
             "instance": "lightScene",
             "value": scene_code,
-        }])
+        })
 
     def set_snapshot(self, data):
         """Activate snapshot mode."""
-        return self.control([{
+        return self.control({
             "type": "devices.capabilities.dynamic_scene",
             "instance": "snapshot",
             "value": data,
-        }])
+        })

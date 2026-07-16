@@ -204,3 +204,35 @@ def parse_color(value, default=0xFFFFFF):
         return hex_to_int(text)
     except (ValueError, TypeError):
         raise ValueError(f"Unknown color: {value!r}")
+
+
+def color_distance(c1, c2):
+    """Euclidean distance between two integer colors in RGB space."""
+    r1, g1, b1 = int_to_rgb(c1)
+    r2, g2, b2 = int_to_rgb(c2)
+    return ((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2) ** 0.5
+
+
+def quantize_frame(colors, max_colors=6):
+    """Reduce the number of unique colors in a frame.
+
+    Keeps the most common colors and maps the rest to their nearest
+    neighbor among the kept colors. This limits the number of API calls
+    needed per frame (one per unique color group).
+    """
+    from collections import Counter
+    color_list = [int(c) for c in colors]
+    unique = set(color_list)
+    if len(unique) <= max_colors:
+        return color_list
+    counter = Counter(color_list)
+    palette = [c for c, _ in counter.most_common(max_colors)]
+    palette_set = set(palette)
+    result = []
+    for c in color_list:
+        if c in palette_set:
+            result.append(c)
+        else:
+            nearest = min(palette, key=lambda p: color_distance(c, p))
+            result.append(nearest)
+    return result

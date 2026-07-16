@@ -4,19 +4,22 @@ import sys
 import time
 
 from .client import GoveeClient
-from .colors import int_to_rgb
+from .colors import int_to_rgb, quantize_frame
 from .font import WIDTH, HEIGHT, NUM_SEGMENTS
 
 
 class GoveeDisplay:
     """High-level controller for the Govee H6022 segment display."""
 
-    def __init__(self, client=None, num_segments=NUM_SEGMENTS, auto_power=True):
+    def __init__(self, client=None, num_segments=NUM_SEGMENTS, auto_power=True,
+                 max_colors=0):
         self.client = client or GoveeClient()
         self.num_segments = num_segments
         self.auto_power = auto_power
+        self.max_colors = max_colors
         self._powered = False
         self._frame_count = 0
+        self._last_frame = None
 
     def _ensure_power(self):
         if self.auto_power and not self._powered:
@@ -34,7 +37,6 @@ class GoveeDisplay:
         return colors
 
     def _preview(self, colors):
-        r, g, b = 0, 0, 0
         lines = []
         for row in range(HEIGHT):
             line = ""
@@ -53,20 +55,34 @@ class GoveeDisplay:
     def render(self, colors):
         """Render a frame (list of 15 RGB integers) to the lamp."""
         colors = self._normalize(colors)
+        if self.max_colors > 0:
+            colors = quantize_frame(colors, self.max_colors)
         if self.client.dry_run:
             self._preview(colors)
             self._frame_count += 1
+            self._last_frame = list(colors)
             return
         self._ensure_power()
-        self.client.set_segments(colors)
+        if self._last_frame is None:
+            self.client.set_segments(colors)
+        else:
+            changed = {}
+            for i, color in enumerate(colors):
+                if color != self._last_frame[i]:
+                    changed.setdefault(int(color), []).append(i)
+            if changed:
+                self.client.set_segment_groups(changed)
+        self._last_frame = list(colors)
         self._frame_count += 1
 
     def clear(self):
         """Turn all segments off."""
         if self.client.dry_run:
             self._preview([0] * self.num_segments)
+            self._last_frame = [0] * self.num_segments
             return
         self.client.set_segments([0] * self.num_segments)
+        self._last_frame = [0] * self.num_segments
 
     def brightness(self, value):
         """Set brightness (0-100)."""
@@ -83,7 +99,7 @@ class GoveeDisplay:
         self._powered = False
 
     def run_frames(self, frames, duration=None, frame_interval=0.6,
-                   on_stop_clear=True, preview_only=False):
+                   on_stop_clear=True):
         """Run a frame generator, pacing output to the rate limit.
 
         Args:
@@ -91,7 +107,6 @@ class GoveeDisplay:
             duration: stop after this many seconds (None = run forever).
             frame_interval: seconds to hold each frame.
             on_stop_clear: clear the display when finished.
-            preview_only: if True, only preview frames without API calls.
         """
         start = time.monotonic()
         count = 0
