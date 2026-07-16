@@ -1,133 +1,106 @@
-"""Scene preset library combining animations, colors, and brightness."""
+"""Preset scene combos — sequences of text + animation, ~15-20s total."""
 
 from .colors import parse_color
 from . import animations
 
 SCENES = {
     "bitcoin": {
-        "animation": "pulse",
-        "color": "bitcoin",
-        "brightness": 100,
-        "frame_interval": 0.6,
-        "description": "Bitcoin orange pulse",
+        "steps": [
+            {"type": "text", "text": "BTC", "mode": "morse", "color": "bitcoin_orange", "duration": 6},
+            {"type": "animate", "name": "bitcoin_orange_pulse", "duration": 5},
+            {"type": "animate", "name": "bitcoin_rain", "duration": 6},
+        ],
+        "brightness": 90,
+        "description": "BTC morse, orange pulse, bitcoin rain",
     },
-    "matrix": {
-        "animation": "matrix_rain",
-        "color": "matrix",
+    "whale": {
+        "steps": [
+            {"type": "animate", "name": "underwater", "duration": 6},
+            {"type": "animate", "name": "whale_swim", "duration": 8},
+        ],
         "brightness": 80,
-        "frame_interval": 0.5,
-        "description": "Matrix digital rain",
+        "description": "Underwater then whale swim",
+    },
+    "goldfish": {
+        "steps": [
+            {"type": "animate", "name": "lava_lamp", "duration": 5},
+            {"type": "animate", "name": "goldfish", "duration": 8},
+        ],
+        "brightness": 80,
+        "description": "Warm glow then goldfish",
+    },
+    "party": {
+        "steps": [
+            {"type": "animate", "name": "disco", "duration": 5},
+            {"type": "animate", "name": "rainbow_chase", "duration": 5},
+            {"type": "animate", "name": "strobe", "duration": 4},
+        ],
+        "brightness": 100,
+        "description": "Disco, rainbow, strobe",
+    },
+    "cyberpunk": {
+        "steps": [
+            {"type": "animate", "name": "neon_sunset", "duration": 7},
+            {"type": "animate", "name": "cyberpunk", "duration": 8},
+        ],
+        "brightness": 90,
+        "description": "Neon sunset then cyberpunk",
+    },
+    "galaxy": {
+        "steps": [
+            {"type": "animate", "name": "galaxy", "duration": 8},
+            {"type": "animate", "name": "color_cycle", "duration": 7},
+        ],
+        "brightness": 80,
+        "description": "Galaxy twinkle then color cycle",
     },
     "fire": {
-        "animation": "fire_flicker",
-        "color": "fire",
+        "steps": [
+            {"type": "animate", "name": "flame_core", "duration": 7},
+            {"type": "animate", "name": "fire_flicker", "duration": 8},
+        ],
         "brightness": 90,
-        "frame_interval": 0.5,
-        "description": "Fire flicker",
+        "description": "Flame core then fire flicker",
     },
-    "ocean": {
-        "animation": "ocean_wave",
-        "color": "ocean",
-        "brightness": 70,
-        "frame_interval": 0.6,
-        "description": "Ocean wave",
+    "matrix": {
+        "steps": [
+            {"type": "animate", "name": "matrix_rain", "duration": 15},
+        ],
+        "brightness": 80,
+        "description": "Matrix rain in green",
     },
     "aurora": {
-        "animation": "aurora_chase",
-        "color": "aurora",
+        "steps": [
+            {"type": "animate", "name": "aurora_chase", "duration": 15},
+        ],
         "brightness": 80,
-        "frame_interval": 0.6,
         "description": "Aurora chase",
     },
-    "rainbow": {
-        "animation": "rainbow_chase",
-        "color": None,
-        "brightness": 90,
-        "frame_interval": 0.6,
-        "description": "Rainbow chase",
-    },
-    "lightning": {
-        "animation": "lightning_flash",
-        "color": "white",
-        "brightness": 100,
-        "frame_interval": 0.4,
-        "description": "Lightning flash",
-    },
-    "heartbeat": {
-        "animation": "heartbeat",
-        "color": "crimson",
-        "brightness": 100,
-        "frame_interval": 0.4,
-        "description": "Heartbeat",
-    },
-    "police": {
-        "animation": "police",
-        "color": None,
-        "brightness": 100,
-        "frame_interval": 0.3,
-        "description": "Police lights",
-    },
-    "candle": {
-        "animation": "candle",
-        "color": "orange",
+    "ocean": {
+        "steps": [
+            {"type": "animate", "name": "ocean_wave", "duration": 7},
+            {"type": "animate", "name": "underwater", "duration": 8},
+        ],
         "brightness": 70,
-        "frame_interval": 0.4,
-        "description": "Candle flicker",
+        "description": "Ocean wave then underwater",
     },
-    "strobe": {
-        "animation": "strobe",
-        "color": "white",
-        "brightness": 100,
-        "frame_interval": 0.3,
-        "description": "Strobe light",
-    },
-    "sunrise": {
-        "animation": "sunrise",
-        "color": "orange",
+    "sunset": {
+        "steps": [
+            {"type": "animate", "name": "neon_sunset", "duration": 8},
+            {"type": "animate", "name": "sunrise", "duration": 7},
+        ],
         "brightness": 80,
-        "frame_interval": 0.6,
-        "description": "Sunrise / sunset",
-    },
-    "bounce": {
-        "animation": "color_bounce",
-        "color": "cyan",
-        "brightness": 90,
-        "frame_interval": 0.4,
-        "description": "Bouncing light",
-    },
-    "twinkle": {
-        "animation": "twinkle",
-        "color": "white",
-        "brightness": 80,
-        "frame_interval": 0.4,
-        "description": "Twinkling stars",
-    },
-    "breathe": {
-        "animation": "breathe",
-        "color": "purple",
-        "brightness": 80,
-        "frame_interval": 0.6,
-        "description": "Breathing purple",
+        "description": "Neon sunset then sunrise",
     },
 }
 
 
 def get_scene(name):
-    """Look up a scene configuration by name."""
     name = name.lower()
     if name not in SCENES:
         raise ValueError(f"Unknown scene: {name}. Available: {', '.join(sorted(SCENES))}")
     return SCENES[name]
 
 
-def build_scene_frames(scene):
-    """Build an infinite frame generator from a scene config."""
-    anim_fn = animations.get_animation(scene["animation"])
-    color = scene.get("color")
-    color_int = parse_color(color) if color else None
-    return anim_fn(color=color_int)
-
-
 def list_scenes():
-    """Return sorted scene names."""
     return sorted(SCENES.keys())

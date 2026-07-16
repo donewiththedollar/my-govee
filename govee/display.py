@@ -1,4 +1,4 @@
-"""Display controller managing the 15-segment lamp."""
+"""Display controller — manages the 15-segment lamp with signal-safe cleanup."""
 
 import signal
 import sys
@@ -12,8 +12,6 @@ DEFAULT_DURATION = 10.0
 
 
 class GoveeDisplay:
-    """High-level controller for the Govee H6022 segment display."""
-
     def __init__(self, client=None, num_segments=NUM_SEGMENTS, auto_power=True,
                  max_colors=0):
         self.client = client or GoveeClient()
@@ -35,7 +33,7 @@ class GoveeDisplay:
     def _normalize(self, colors):
         colors = list(colors)
         if len(colors) < self.num_segments:
-            colors = colors + [0] * (self.num_segments - len(colors))
+            colors += [0] * (self.num_segments - len(colors))
         elif len(colors) > self.num_segments:
             colors = colors[:self.num_segments]
         return colors
@@ -56,21 +54,18 @@ class GoveeDisplay:
         sys.stdout.write("\n".join(lines) + "\n")
         sys.stdout.flush()
 
-    def _install_signal_handlers(self):
+    def _install_signals(self):
         self._stop = False
-
-        def _handler(signum, frame):
+        def _h(signum, frame):
             self._stop = True
+        self._old_int = signal.signal(signal.SIGINT, _h)
+        self._old_term = signal.signal(signal.SIGTERM, _h)
 
-        self._old_int = signal.signal(signal.SIGINT, _handler)
-        self._old_term = signal.signal(signal.SIGTERM, _handler)
-
-    def _restore_signal_handlers(self):
+    def _restore_signals(self):
         signal.signal(signal.SIGINT, self._old_int)
         signal.signal(signal.SIGTERM, self._old_term)
 
     def render(self, colors):
-        """Render a frame (list of 15 RGB integers) to the lamp."""
         colors = self._normalize(colors)
         if self.max_colors > 0:
             colors = quantize_frame(colors, self.max_colors)
@@ -84,37 +79,17 @@ class GoveeDisplay:
             self.client.set_segments(colors)
         else:
             changed = {}
-            for i, color in enumerate(colors):
-                if color != self._last_frame[i]:
-                    changed.setdefault(int(color), []).append(i)
+            for i, c in enumerate(colors):
+                if c != self._last_frame[i]:
+                    changed.setdefault(int(c), []).append(i)
             if changed:
                 self.client.set_segment_groups(changed)
         self._last_frame = list(colors)
         self._frame_count += 1
 
-    def clear(self):
-        """Turn all segments off."""
-        if self.client.dry_run:
-            self._preview([0] * self.num_segments)
-            self._last_frame = [0] * self.num_segments
-            return
-        self.client.set_segments([0] * self.num_segments)
-        self._last_frame = [0] * self.num_segments
-
-    def brightness(self, value):
-        """Set brightness (0-100)."""
-        self.client.set_brightness(value)
-
-    def set_color(self, rgb):
-        """Set the whole lamp to a single color."""
-        self._ensure_power()
-        self.client.set_color(rgb)
-
     def render_color(self, color):
-        """Set the whole lamp to a single color (uses colorRgb capability)."""
         if self.client.dry_run:
-            frame = [int(color)] * self.num_segments
-            self._preview(frame)
+            self._preview([int(color)] * self.num_segments)
             self._frame_count += 1
             return
         if color == 0:
@@ -124,22 +99,28 @@ class GoveeDisplay:
             self.client.set_color(int(color))
         self._frame_count += 1
 
+    def clear(self):
+        if self.client.dry_run:
+            self._preview([0] * self.num_segments)
+            self._last_frame = [0] * self.num_segments
+            return
+        self.client.set_segments([0] * self.num_segments)
+        self._last_frame = [0] * self.num_segments
+
+    def brightness(self, value):
+        self.client.set_brightness(value)
+
+    def set_color(self, rgb):
+        self._ensure_power()
+        self.client.set_color(rgb)
+
     def power_off(self):
-        """Turn the lamp off."""
         self.client.set_power(False)
         self._powered = False
 
     def run_frames(self, frames, duration=DEFAULT_DURATION, frame_interval=0.6,
                    on_stop_clear=True):
-        """Run a frame generator with automatic timeout and signal handling.
-
-        Args:
-            frames: iterable yielding lists of 15 colors.
-            duration: stop after this many seconds (None = forever, not recommended).
-            frame_interval: seconds to hold each frame.
-            on_stop_clear: clear the display when finished.
-        """
-        self._install_signal_handlers()
+        self._install_signals()
         start = time.monotonic()
         count = 0
         try:
@@ -154,15 +135,14 @@ class GoveeDisplay:
         except Exception:
             pass
         finally:
-            self._restore_signal_handlers()
+            self._restore_signals()
             if on_stop_clear:
                 self.clear()
         return count
 
     def run_color_frames(self, color_gen, duration=DEFAULT_DURATION,
                          frame_interval=1.0, on_stop_clear=True):
-        """Run a generator of single color ints (whole-lamp color mode)."""
-        self._install_signal_handlers()
+        self._install_signals()
         start = time.monotonic()
         count = 0
         try:
@@ -177,7 +157,75 @@ class GoveeDisplay:
         except Exception:
             pass
         finally:
-            self._restore_signal_handlers()
+            self._restore_signals()
             if on_stop_clear:
                 self.render_color(0)
         return count
+
+    def run_timed_color_frames(self, timed_gen, duration=DEFAULT_DURATION,
+                               on_stop_clear=True):
+        """Run (color, hold_seconds) pairs — for morse code."""
+        self._install_signals()
+        start = time.monotonic()
+        count = 0
+        try:
+            for color, hold in timed_gen:
+                if self._stop:
+                    break
+                if duration is not None and (time.monotonic() - start) >= duration:
+                    break
+                self.render_color(color)
+                count += 1
+                if hold > 0:
+                    time.sleep(hold)
+        except Exception:
+            pass
+        finally:
+            self._restore_signals()
+            if on_stop_clear:
+                self.render_color(0)
+        return count
+
+    def run_scene(self, scene, brightness=None):
+        """Run a scene with multiple steps (text + animation)."""
+        self._install_signals()
+        if brightness is not None:
+            self.brightness(brightness)
+        else:
+            self.brightness(scene.get("brightness", 80))
+        from . import text as text_mod
+        from . import animations as anim_mod
+        from .colors import parse_color
+        total = 0
+        try:
+            for step in scene["steps"]:
+                if self._stop:
+                    break
+                step_dur = step.get("duration", 5)
+                if time.monotonic() - (start := time.monotonic()) > 0 and total > 100:
+                    break
+                if step["type"] == "text":
+                    color = parse_color(step.get("color", "white"))
+                    mode = step.get("mode", "morse")
+                    txt = step.get("text", "").upper()
+                    if mode == "morse":
+                        gen = text_mod.morse_frames(txt, color=color)
+                        n = self.run_timed_color_frames(gen, duration=step_dur)
+                    elif mode == "flash":
+                        gen = text_mod.flash_frames(txt, color=color)
+                        n = self.run_color_frames(gen, duration=step_dur, frame_interval=1.0)
+                    else:
+                        gen = text_mod.segment_map_frames(txt, color=color)
+                        n = self.run_frames(gen, duration=step_dur, frame_interval=0.8)
+                    total += n
+                elif step["type"] == "animate":
+                    anim_fn = anim_mod.get_animation(step["name"])
+                    frames = anim_fn()
+                    n = self.run_frames(frames, duration=step_dur, frame_interval=0.6)
+                    total += n
+        except Exception:
+            pass
+        finally:
+            self._restore_signals()
+            self.clear()
+        return total

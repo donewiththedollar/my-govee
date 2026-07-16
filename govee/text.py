@@ -1,42 +1,21 @@
-"""Text rendering: flash and scroll modes for the 15-segment display.
-
-The H6022 lamp has 15 segments arranged in a strip (not a grid), so
-2D letter shapes are not directly visible. To make text readable:
-
-- **Auto-color mode** (default): each letter gets a unique color based on
-  its position in the alphabet, so B, T, C are visually distinct even
-  though the segment pattern alone may not form a recognizable letter.
-- **Pattern mode**: each letter also lights a distinct subset of segments
-  (flattened from the 3x5 font), adding a second visual differentiator.
-- **Solid mode** (--solid): lights ALL 15 segments in the letter's color
-  for maximum visibility on a 1D strip.
-"""
+"""Text display modes: morse, flash, scroll, segment_map."""
 
 from .colors import hsv_to_rgb
-from .font import WIDTH, HEIGHT, NUM_SEGMENTS, char_bitmap, char_columns
+from .font import (WIDTH, HEIGHT, NUM_SEGMENTS, char_bitmap, char_columns,
+                   MORSE, MORSE_DOT, MORSE_DASH, MORSE_ELEMENT_GAP,
+                   MORSE_LETTER_GAP, MORSE_WORD_GAP)
 
 
 def letter_color(ch):
-    """Assign a unique color to a character based on its identity.
-
-    Letters A-Z map to hues spread across the spectrum.
-    Digits 0-9 map to blue-violet hues.
-    Other characters get a warm amber.
-    """
     ch = ch.upper()
     if "A" <= ch <= "Z":
-        idx = ord(ch) - ord("A")
-        hue = idx * (360.0 / 26)
-        return hsv_to_rgb(hue, 0.85, 1.0)
+        return hsv_to_rgb((ord(ch) - ord("A")) * (360.0 / 26), 0.85, 1.0)
     if "0" <= ch <= "9":
-        idx = ord(ch) - ord("0")
-        hue = 200 + idx * 18
-        return hsv_to_rgb(hue, 0.85, 1.0)
+        return hsv_to_rgb(200 + (ord(ch) - ord("0")) * 18, 0.85, 1.0)
     return hsv_to_rgb(40, 0.85, 1.0)
 
 
 def render_char(ch, color, bg=0):
-    """Render a single character to a list of 15 segment colors."""
     bm = char_bitmap(ch)
     colors = []
     for r in range(HEIGHT):
@@ -45,18 +24,33 @@ def render_char(ch, color, bg=0):
     return colors
 
 
-def render_solid(ch, color, bg=0):
-    """Render a character as all 15 segments lit in its color."""
-    return [color] * NUM_SEGMENTS
+def morse_frames(text, color=0xFFFFFF, speed=1.0):
+    """Yield (color_int, hold_seconds) tuples for morse code flashing.
 
-
-def color_frames(text, color=None, blank=True):
-    """Yield whole-lamp color values (single int per frame) for text.
-
-    Uses the colorRgb capability (whole-lamp color) instead of segment
-    commands. More reliable on devices where segment control may not
-    be fully supported via the cloud API.
+    Uses whole-lamp colorRgb. dot=0.3s, dash=0.9s, element gap=0.3s,
+    letter gap=0.3s, word gap=0.7s. Speed scales all durations.
     """
+    dot = MORSE_DOT / speed
+    dash = MORSE_DASH / speed
+    egap = MORSE_ELEMENT_GAP / speed
+    lgap = MORSE_LETTER_GAP / speed
+    wgap = MORSE_WORD_GAP / speed
+    for ch in text.upper():
+        code = MORSE.get(ch)
+        if code is None or code == "/":
+            yield (0, wgap)
+            continue
+        for elem in code:
+            if elem == ".":
+                yield (color, dot)
+            else:
+                yield (color, dash)
+            yield (0, egap)
+        yield (0, lgap)
+
+
+def flash_frames(text, color=None, bg=0, blank=True):
+    """Yield whole-lamp color ints — one color per letter, blank between."""
     if not text:
         while True:
             yield 0
@@ -68,24 +62,20 @@ def color_frames(text, color=None, blank=True):
                 yield 0
 
 
-def flash_frames(text, color=None, bg=0, blank=True, solid=False):
-    """Yield frames that flash each character sequentially (loops forever).
+def color_frames(text, color=None, blank=True):
+    """Alias for flash_frames — whole-lamp color per letter."""
+    return flash_frames(text, color=color, blank=blank)
 
-    Args:
-        text: string to display.
-        color: fixed color for all letters, or None for auto-color per letter.
-        bg: background (off) color, default 0 (black).
-        blank: insert a blank frame between letters.
-        solid: if True, light all 15 segments per letter (max visibility).
-    """
+
+def segment_map_frames(text, color=None, bg=0, blank=True):
+    """Yield 15-color segment lists using 3x5 font (experimental)."""
     if not text:
         while True:
             yield [bg] * NUM_SEGMENTS
-    render_fn = render_solid if solid else render_char
     while True:
         for ch in text:
             c = color if color is not None else letter_color(ch)
-            yield render_fn(ch, c, bg)
+            yield render_char(ch, c, bg)
             if blank:
                 yield [bg] * NUM_SEGMENTS
 
@@ -99,10 +89,7 @@ def _build_text_columns(text):
 
 
 def scroll_frames(text, color=None, bg=0, width=WIDTH):
-    """Yield frames that scroll text across the display (loops forever).
-
-    Each letter gets its own color (auto-color) unless a fixed color is given.
-    """
+    """Yield 15-color segment lists scrolling text across the display."""
     if not text:
         while True:
             yield [bg] * NUM_SEGMENTS
@@ -110,15 +97,14 @@ def scroll_frames(text, color=None, bg=0, width=WIDTH):
     cols = _build_text_columns(text)
     pad = [[False] * HEIGHT for _ in range(2)]
     cols = pad + cols + pad
-    if len(cols) <= width:
-        while True:
-            c = color if color is not None else letter_color(text[0])
-            yield render_char(text[0], c, bg)
-        return
     char_colors = {}
     for ch in text:
         if ch not in char_colors:
             char_colors[ch] = color if color is not None else letter_color(ch)
+    if len(cols) <= width:
+        while True:
+            yield render_char(text[0], char_colors.get(text[0], 0xFFFFFF), bg)
+        return
     while True:
         for start in range(len(cols) - width + 1):
             window = cols[start:start + width]
@@ -126,17 +112,5 @@ def scroll_frames(text, color=None, bg=0, width=WIDTH):
             for r in range(HEIGHT):
                 for c in range(width):
                     lit = window[c][r] if c < len(window) else False
-                    if lit:
-                        col_idx = start + c
-                        ch_idx = 0
-                        running = 2
-                        for ci, ch in enumerate(text):
-                            if running <= col_idx < running + WIDTH + 1:
-                                ch_idx = ci
-                                break
-                            running += WIDTH + 1
-                        ch = text[ch_idx] if ch_idx < len(text) else text[0]
-                        colors.append(char_colors.get(ch, color or 0xFFFFFF))
-                    else:
-                        colors.append(bg)
+                    colors.append(char_colors.get(text[0], 0xFFFFFF) if lit else bg)
             yield colors

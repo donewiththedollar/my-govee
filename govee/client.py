@@ -236,3 +236,14 @@ class GoveeClient:
             "instance": "snapshot",
             "value": data,
         })
+
+    def cleanup(self):
+        """Turn off all segments and power off — for signal handlers."""
+        try:
+            self.set_segments([0] * 15)
+        except Exception:
+            pass
+        try:
+            self.set_power(False)
+        except Exception:
+            pass

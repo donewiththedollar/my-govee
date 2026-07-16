@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entry point for the Govee H6022 Quantum Desk Lamp display controller."""
+"""Govee H6022 Quantum Desk Lamp display engine."""
 
 import os
 import sys
